@@ -1,0 +1,112 @@
+function report_big_motion(study,task,subjectlist)
+%AES march 2013
+%e.g. report_big_motion('EIB','tomloc', makeIDs('EIB', [1:13, 15:20]));
+% gets max movement per run and list runs in which subject moved more than specified threshold (to exclude runs with huge movements)
+
+% set thresholds
+transthresh=[2 4 6 8];
+rotthresh=[.02 .04 .06 .08];
+%%
+
+numSubj=length(subjectlist);
+runs=listbolds(task, subjectlist);
+
+
+for threshold=1:length(transthresh)
+
+passThreshTrans=zeros(numSubj,1);
+passThreshRot=zeros(numSubj,1);
+propPassThreshTrans=zeros(numSubj,1);
+propPassThreshRot=zeros(numSubj,1);
+
+
+for s=1:numSubj
+    subject=subjectlist{s};
+rootdir='/mindhive/saxelab2/';
+cd(rootdir)
+cd(study);
+cd(subject);
+runlist=runs{s};
+cd('bold')
+if isempty(runlist)
+    passThreshTrans(s)=0;
+    propPassThreshTrans(s)=0;
+    passThreshRot(s)=0;
+    propPassThreshRot(s)=0;
+    
+else
+for i=1:length(runlist)
+    bolddir=runlist(i);
+    cd(['0' num2str(bolddir)])
+    matfile=adir('art_*movement*.mat');
+    load(matfile{1})
+runtrans{i}=R(:,end-5:end-3);
+runrot{i}=R(:,end-2:end);
+maxtrans{i}=max(runtrans{i});
+maxrot{i}=max(runrot{i});
+bigtrans{i}=runtrans{i}(runtrans{i}>transthresh(threshold));
+bigrot{i}=runrot{i}(runrot{i}>rotthresh(threshold));
+if ~isempty(bigtrans{i}) 
+    disp (['translation > ' num2str(transthresh(threshold)) ' in run ' num2str(runlist(i)) ' subject ' subject]);
+    passThreshTrans(s)=passThreshTrans(s)+1;
+end
+if ~isempty(bigrot{i})
+    disp (['rotation > ' num2str(rotthresh(threshold)) ' in run ' num2str(runlist(i)) ' subject ' subject]);
+    passThreshRot(s)=passThreshRot(s)+1;
+end
+cd ..
+end
+
+propPassThreshTrans(s)=passThreshTrans(s)/i;
+propPassThreshRot(s)=passThreshRot(s)/i;
+
+cd ..
+if ~exist('quality')
+mkdir('quality')
+end
+cd('quality')
+transstring=['translation threshold =' num2str(transthresh(threshold))];
+rotstring=['rotation threshold =' num2str(transthresh(threshold))];
+save(['motion_info_' task '_threshold' num2str(threshold) '.mat'], 'task', 'transstring', 'rotstring', 'runlist', 'runtrans', 'runrot', 'maxtrans', 'maxrot', 'bigtrans', 'bigrot')
+
+
+
+subj(s).id=subjectlist{s};
+subj(s).bigtrans{i}=bigtrans{i};
+subj(s).bigrot{i}=bigrot{i};
+
+
+end
+end
+cd([rootdir '/' study '/group_quality'])
+
+savestr=[task '_threshold' num2str(threshold)];
+eval([task '_threshold' num2str(threshold) '= subj';]);
+%save(['motion_info_' task '_threshold' num2str(threshold) '.mat'], 'subj') 
+
+for c=1:length(subjectlist)
+   
+subjectlabels(c)=str2double(subjectlist{c}(end-1:end));
+
+subplot(3,1,1);bar(propPassThreshTrans);ylim([0 1]);ylabel('% runs > threshold');title(['Translations > ' num2str(transthresh(threshold))]);set(gca,'XTick',[])
+subplot(3,1,2);bar(propPassThreshRot);ylim([0 1]);xlabel('Subject ID');ylabel('% runs > threshold');title(['Rotations > ' num2str(rotthresh(threshold))]);set(gca,'XTick',[])
+%subplot(3,1,3);bar(motion(:,3));xlabel('Subject #');ylabel('# Artifacts');title('Mean Artifacts / Run');
+set(gca,'XTick',1:numSubj)
+set(gca,'XTickLabel',subjectlabels)
+p=gcf;
+saveas(p, [rootdir study '/group_quality/bigmovements_' task '_threshold' num2str(threshold)]);
+hold off
+clear gcf
+end
+
+if threshold==1
+save(['motion_info_' task '.mat'], savestr)    
+else
+save(['motion_info_' task '.mat'], '-append', savestr) 
+end
+
+end
+
+ 
+
+end

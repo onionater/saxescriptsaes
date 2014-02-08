@@ -1,0 +1,248 @@
+function summarize_mvpaptb(subjectlist, mvparesults)
+
+numSubj=length(subjectlist);
+pdim=ceil(sqrt(numSubj));
+
+'ROI_linsula_wfu_xyz',...
+rootdir='/mindhive/saxelab2/EIB/';
+cd(rootdir)
+mkdir([rootdir 'mvpaptb/' mvparesults '/']);
+mkdir([rootdir 'mvpaptb/' mvparesults '/specifics/']);
+subjmvpa=['mvpa_ptb/' mvparesults '/'];
+groupmvpadir=[rootdir 'mvpaptb/' mvparesults '/'];
+condarray={'mu','fu','mh','fh','nu','su','nh','sh'};
+condstring=condarray{1};
+for x=2:length(condarray) 
+    condstring=[condstring '_' condarray{x}];
+end
+
+roilist={
+    'ROI_RTPJ_tomloc',...
+    'ROI_LTPJ_tomloc',...
+    'ROI_RSTS_tomloc',...
+    'ROI_LSTS_tomloc',...
+    'ROI_PC_tomloc',...
+    'ROI_MMPFC_tomloc',...
+    'ROI_DMPFC_tomloc',...
+    'ROI_rFFA_kanparcelFaceObj_EmoBioLoc',...
+    'ROI_lFFA_kanparcelFaceObj_EmoBioLoc',...
+    'ROI_rSTS_kanparcelFaceObj_EmoBioLoc',...
+    'ROI_lSTS_kanparcelFaceObj_EmoBioLoc',...
+    'ROI_rOFA_kanparcelFaceObj_EmoBioLoc',...
+    'ROI_lOFA_kanparcelFaceObj_EmoBioLoc',...
+    'ROI_rLOC_foundObjFace_EmoBioLoc',...
+    'ROI_lLOC_foundObjFace_EmoBioLoc',...
+    'ROI_rinsula_wfu_xyz',...
+    'ROI_rvSTR_reward_xyz',...
+    'ROI_vmPFC_reward_xyz',...
+    'ROI_right_ant_temporal_xyz',...
+    'ROI_ramygdala_wfu_xyz',...
+    'ROI_MPFC_peelenpeak_xyz',...
+    'ROI_lSTS_peelenpeak_xyz',...
+    'ROI_lvSTR_reward_xyz',... 
+    'ROI_linsula_wfu_xyz',...
+    'ROI_left_ant_temporal_xyz',...
+    'ROI_lamygdala_wfu_xyz'};
+numROIs=length(roilist);
+
+% figure out possible discriminations
+template=load([rootdir subjectlist{1} '/mvpa_ptb/discriminations.mat']);
+ds=fieldnames(template)
+numDisc=length(ds);
+        for d=1:numDisc
+            desc=ds{d};
+            % figure out if this disc has multiple selector options
+            templateDES=dir([rootdir subjectlist{1} '/' subjmvpa roilist{1}(5:end) '*' desc '*classification.mat']); % to identify num of disc variants for the descrimination
+            numDES=size(templateDES);
+            for dse=1:numDES(1)
+                    tempdesc=templateDES(dse).name;
+            for roin=1:numROIs
+                roiname=roilist{roin};
+                roiname=roiname(5:end);
+               subjcount=0; 
+               index=strfind(tempdesc, desc);
+               tempdesc=tempdesc(index:end);
+               disp(['working on discrimination ' tempdesc ' in roi ' roilist{roin}]);
+               for subj=1:numSubj
+                subject=subjectlist{subj};
+                subjnum=(subject(end-1:end));
+                subjdir=[rootdir subject '/'];
+                resultsdir=[subjdir subjmvpa];
+                cd(resultsdir)
+                findfolder=dir(resultsdir);
+                if isempty(findfolder)
+                    disp(['couldn"t find folder for subject ' subject])
+                else
+                  
+                    subjdesc=dir([resultsdir roiname '*' tempdesc]);
+                    if isempty(subjdesc)
+                        disp(['subject ' subject ' doesnt have that discrimination for roi ' roiname])
+                        hasroi(roin,subj)=0;
+                    else
+                    currentdesc=subjdesc.name;
+                    currentdesc=currentdesc(1:end-19);
+                        hasroi(roin,subj)=1;
+                        subjcount=subjcount+1;
+                        subjlabels{roin}{subjcount}=subjnum; 
+
+              %% do all the relevant things  
+                
+              %% get numvoxels
+              load([currentdesc 'voxelsINmasks.mat']);
+              voxelsGroup{subjcount}=masksize;
+              %% get vector of classification accuracies across folds
+              load([currentdesc '_classification.mat']);
+              numIterations=length(results.iterations);
+              numConds=length(unique(results.iterations(1).perfmet.desireds));
+              chance=1/numConds;
+              for it=1:numIterations
+              vectorPerf(it)=results.iterations(it).perf;
+              end
+              vectorPerfGroup{subjcount}=vectorPerf;
+              %% get mean classification accuracy, and SE of that mean
+              meanPerf=mean(vectorPerf);
+              stePerf=std(vectorPerf)/sqrt(numIterations);
+              avgPerfGroup(subjcount)=meanPerf;
+              avgPerfSEGroup(subjcount)=stePerf;
+              %% get conf matrix
+              confmat=multiple_iterations_confusion_amy(results);
+              confmatGroup(:,:,subjcount)=confmat;
+           
+              clearvars results numIterations vectorPerf meanPerf stePerf confmat  
+           end 
+                end
+                
+               end
+cd([groupmvpadir 'specifics'])      
+
+%% make summary plot of num voxels in each fold
+scount=0;
+for s=1:numSubj
+    if hasroi(roin,s)
+        scount=scount+1;
+    subplot(pdim,pdim,s);bar(voxelsGroup{scount});ylabel('# voxels');xlabel(subjectlist{s});set(gca,'XTick',[])
+    end
+end
+p=gcf;
+saveas(p, [currentdesc '_voxelcounts.fig']);
+save([currentdesc '_voxelcounts.mat'], 'voxelsGroup');
+clear gcf
+close all
+%% make classification accuracy bar graph (with standard error across folds)
+ width=24;
+ height=12;
+ h1 = figure(); 
+set(h1, 'units','inches')
+set(h1, 'Position', [10 10 width height])
+scount=0;
+for s=1:numSubj
+    if hasroi(roin,s)
+        scount=scount+1;
+    subplot(pdim,pdim,s);bar(vectorPerfGroup{scount});ylim([0 1]);ylabel('class perf');xlabel('perf in each fold');title(subjectlist{s});set(gca,'XTick',[])
+    refline(0,chance);
+    end
+end
+p=gcf;
+saveas(p, [currentdesc '_classPerfInEachFold.fig']);
+clear gcf
+close all
+save([currentdesc '_groupPerfVect.mat'], 'vectorPerfGroup')
+%% make classification accuracy subplots (each containing all folds for each subject)
+barwitherr(avgPerfSEGroup, avgPerfGroup);ylim([0 1]);ylabel('class perf'); set(gca, 'XTickLabel', subjlabels{roin});
+refline(0,chance);
+p=gcf;
+saveas(p, [currentdesc '_classPerfAcrossFolds.fig']);
+clear gcf
+close all
+save([currentdesc '_groupavgs.mat'], 'avgPerfGroup', 'avgPerfSEGroup')
+%% make confusion matrix
+scount=0;
+ width=24;
+ height=12;
+ h1 = figure();
+set(h1, 'units','inches')
+set(h1, 'Position', [10 10 width height])
+for s=1:numSubj
+    if hasroi(roin,s)
+        scount=scount+1;
+    subplot(pdim,pdim,s);imagesc(confmatGroup(:,:,scount), [0 1]);ylabel('conf matrix');xlabel(condstring);title(subjectlist{s});set(gca,'XTick',[])
+    colormap(hot)
+    colorbar
+    end
+end
+saveas(p, [currentdesc '_confusions.fig']);
+clear gcf
+close all
+save([currentdesc '_confusions.mat'], 'confmatGroup') 
+
+%% make summaries across ROIs
+confmatALLROIS(:,:,roin)=mean(confmatGroup,3);
+AvgPerfAllROIS{roin}=avgPerfGroup;
+AvgPerfSEAllROIS{roin}=avgPerfSEGroup;
+
+clearvars confmatGroup avgPerfGroup avgPerfSEGroup vectorPerfGroup voxelsGroup
+cd .. 
+cd ..
+cd ..
+            end
+cd(groupmvpadir)
+
+g=findstr(currentdesc, 'ind');
+if isempty(g)
+   h=findstr(currentdesc, 'group');
+   index=h+6;
+else
+    index=g+4;
+end
+newdesc=currentdesc(index:end);
+ width=48;
+ height=24;
+ h1 = figure(); 
+set(h1, 'units','inches')
+set(h1, 'Position', [10 10 width height])
+for n=1:numROIs
+
+    roiarray=AvgPerfAllROIS{n};
+    if length(roiarray)>1
+    [h,p]=ttest(roiarray,chance,0.05,'right'); %% do a ttest comparing mean accuracy across subjects to chance
+    else
+    h=0;
+    end
+    if h
+        barcol='g'; % green if significant
+    else
+        barcol='r';
+    end
+subplot(ceil(sqrt(numROIs)-1),ceil(sqrt(numROIs)),n);barwitherr(AvgPerfSEAllROIS{n}, AvgPerfAllROIS{n}, barcol);title(roilist{n}); set(gca,'XTick',[]); %set(gca, 'XTickLabel', subjlabels{n});
+if n==1 || mod(n,ceil(sqrt(numROIs)))==0
+ylabel('class perf'); 
+ylim([0 1]);
+end
+refline(0,chance)
+end
+p=gcf;
+saveas(p, [newdesc '_classAllROIs.fig']);
+clear gcf
+close all
+
+ width=48;
+ height=24;
+ h1 = figure(); 
+set(h1, 'units','inches')
+set(h1, 'Position', [10 10 width height])
+for n=1:numROIs
+    subplot(ceil(sqrt(numROIs)-1), ceil(sqrt(numROIs)),n);imagesc(confmatALLROIS(:,:,n), [0 1]);xlabel(condstring);title(roilist{n});set(gca,'XTick',[]),set(gca,'YTick',[])
+    colormap(hot)
+    %if mod(n,ceil(sqrt(numROIs)))==0
+    colorbar
+    %end
+end
+p=gcf;
+saveas(p, [newdesc '_confusions.fig']);
+clear gcf
+close all
+
+clearvars confmatALLROIS AvgPerfAllROIS AvgPerfSEAllROIS
+            end
+        end
+end
