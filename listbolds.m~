@@ -1,0 +1,18 @@
+function listbolds(task, subjects)
+%% created by AES 3/26/13
+%%takes as input a task and a cell array of subjects, prints cell array of
+%%relevant bold directories
+%% meant to be called as argument for other modeling scripts
+
+load('EIB_subject_taskruns.mat')
+numSubjects=size(s)
+
+for i=1:length(subjects)
+   
+    subjID= subjects{i}
+    
+    
+    
+end
+
+end

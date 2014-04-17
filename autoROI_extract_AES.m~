@@ -1,0 +1,391 @@
+function autoROI_extract_AES(study,subjects,task,rois,uconfig)
+
+%-------------------------------------------------------------------------%
+% CONFIGURATION
+%-------------------------------------------------------------------------%
+config.remove_artifacts     = 1;
+config.remove_outliers      = 0; 
+config.intensity_thresh     = 3; 
+config.baseline_window      = 4;
+config.window_start         = -1;
+config.window_end           = 7; 
+config.group_rois           = 0;
+config.runs                 = 'all'; % integer, or 'all'
+config.n_assumed_runs       = 8; % maximum number of runs the in the study
+
+if exist('uconfig','var')&&~iscell(uconfig)
+    fprintf('\n\tWARNING: Your user configuration is not a cell array!\n');
+end
+if exist('uconfig','var')&&iscell(uconfig) % then they've included a custom configuration
+    uco = fieldnames(config); % uco = user-configurable options
+    for ovs = 1:2:length(uconfig)
+        cov = uconfig([ovs,ovs+1]); % current configuration parameter-value pair
+        dne = 0; % if 1, 'do not evaluate'
+        if ~ischar(cov{1})
+            warning('Extra variable %i is not a string',(ovs+1)/2);
+            dne = 1;
+        end
+        % validation step 2: ensure that cov{1} is a variable that can be 
+        % changed
+        if ~dne&&~any(strcmp(cov{1},uco))
+            warning('%s is not a user-configurable parameter',cov{1});
+            dne = 1;
+        end
+        if ~dne
+            config.(cov{1}) = cov{2};
+        end
+    end
+end
+config = config; % ??? < what is this here for?
+%-------------------------------------------------------------------------%
+% STUDY
+%-------------------------------------------------------------------------%
+if (~nargin||(exist('study','var')&&isempty(study)))
+    % no study has been specified
+    study = inputdlg('What is the study name?');
+    if isempty(study)
+        study = '*';
+    end
+    pos_stu = adir(fullfile('/mindhive','saxelab*',['*' study{:} '*']));
+    if ~iscell(pos_stu)
+        pos_stu = adir(fullfile('/*','saxelab*',study{:}));
+        if ~iscell(pos_stu)
+            error('Could not locate study.\n');
+        end
+    end
+    if length(pos_stu) > 1
+        % the user must disambiguate which study they wish
+        study = pos_stu(listdlg('ListString',pos_stu,'SelectionMode','single','PromptString','Multiple studies found, please choose one','ListSize',[500,300]));
+        if isempty(study)
+            error('No study chosen.\n');
+        end
+    else
+        study = pos_stu;
+    end
+else
+    if iscell(study)
+        study = study{:};
+    end
+    pos_stu = adir(fullfile('/mindhive','saxelab*',['*' study '*']));
+    if ~iscell(pos_stu)
+        pos_stu = adir(fullfile('/*','saxelab*',study));
+        if ~iscell(pos_stu)
+            error('Could not locate study.\n');
+        end
+    end
+    if length(pos_stu) > 1
+        % the user must disambiguate which study they wish
+        study = pos_stu(listdlg('ListString',pos_stu,'SelectionMode','single','PromptString','Multiple studies found, please choose one','ListSize',[500,300]));
+        if isempty(study)
+            error('No study chosen.\n');
+        end
+    else
+        study = pos_stu;
+    end
+end
+while iscell(study)
+    study = study{:};
+end
+cd(study);
+%-------------------------------------------------------------------------%
+% SUBJECTS
+%-------------------------------------------------------------------------%
+if ~exist('subjects','var')||isempty(subjects)
+    % have them pick subjects
+    pos_sub = adir('*/results/*/SPM.mat');
+    pos_sub = unique(cellfun(@(x) x{1}, regexp(pos_sub,'/','split'),'UniformOutput',false));
+    if ~iscell(pos_sub)
+        error('Could not locate subject(s)\n');
+    elseif length(pos_sub) > 1
+        subjects = pos_sub(listdlg('ListString',pos_sub,'SelectionMode','multiple','PromptString','Multiple subjects found, please choose desired subjects','ListSize',[300,300]));
+    else
+        subjects = pos_sub;
+    end
+elseif ~iscell(subjects)&&ischar(subjects)
+    % find all available subjects that match a given criteria
+    subjects = adir(['*' subjects '*']);
+end
+%-------------------------------------------------------------------------%
+% TASK
+%-------------------------------------------------------------------------%
+% for task, we're going to compile a list of all available tasks that exist
+% across all subjects
+if ~exist('task','var')||isempty(task)
+    null = unique(adir(fullfile(subjects{1},'results','*')));
+    res_dirs = cellfun(@(x) x{end},regexp(null,'/','split'),'UniformOutput',false);
+    for i = 2:length(subjects)
+        null = unique(adir(fullfile(subjects{i},'results','*')));
+        null = cellfun(@(x) x{end},regexp(null,'/','split'),'UniformOutput',false);
+        res_dirs = intersect(res_dirs,null);
+    end
+    task = res_dirs(listdlg('ListString',res_dirs,'SelectionMode','single','PromptString','Please select the task','ListSize',[500,300]));
+end
+while iscell(task)
+    task = task{:};
+end
+%-------------------------------------------------------------------------%
+% ROIS
+%-------------------------------------------------------------------------%
+if ~config.group_rois
+    if ~exist('rois','var')||isempty(rois)
+        rois = {};
+        for i = 1:length(subjects)
+            null = unique(adir(fullfile(subjects{i},'autoROI','*.mat')));
+            if iscell(null)
+                null = cellfun(@(x) x{end},regexp(null,'/','split'),'UniformOutput',false);
+                rois = [rois null];
+            end
+        end
+        rois = unique(rois);
+        rois = rois(listdlg('ListString',rois,'SelectionMode','multiple','PromptString','Please select the ROIs','ListSize',[500,300]));
+    end
+else
+    if ~exist('rois','var')||isempty(rois)
+        rois = cellstr(spm_select([1 Inf],'mat','Select ROI xyz files'));
+    end
+end
+%-------------------------------------------------------------------------%
+% BEGIN EXTRACTION
+%-------------------------------------------------------------------------%
+% Iterate over subjects
+for s = 1:length(subjects)
+    cur_sub = subjects{s};
+    fprintf('Subject: %s\n',cur_sub);
+    fprintf('\tLoading ROIs...\n');
+    % locate all of this subject's ROIs...
+    cur_rois = {};
+    roi_names = {};
+    roi_points = [];
+    for i = 1:length(rois)
+        if ~config.group_rois
+            null = adir(fullfile(cur_sub,'autoROI',rois{i}));
+        else
+            null = rois(i);
+        end
+        if iscell(null)
+            cur_rois{end+1} = null{1};
+            roi_names{end+1} = rois{i};
+            null = load(cur_rois{end});
+            if ~isfield(null,'roi_XYZ')
+                if isfield(null,'roi_xyz')
+                    load(cur_rois{end},'roi_xyz');
+                    roi_XYZ = roi_xyz;
+                    null = spm_vol(fullfile(study,cur_sub,'results',task,'beta_0001.img'));
+                    roi_XYZ = mm2vox(roi_XYZ,null);
+                else
+                    error('can''t interpret ROI file...\n');
+                end
+            else
+                load(cur_rois{end},'roi_XYZ');
+            end
+            roi_XYZ(:,4) = i;
+            roi_points = [roi_points; roi_XYZ];
+        end
+    end
+    if ~isempty(roi_points)
+    % load the SPM file
+    fprintf('\tLoading SPM...\n');
+    load(fullfile(cur_sub,'results',task,'SPM.mat'));
+    fprintf('\tLoading artifacts...\n');
+    bdirs = unique(cellfun(@(x) fileparts(x), cellstr(SPM.xY.P),'UniformOutput',false));
+    skp = 0;
+    arts = [];
+    for bdir = 1:length(bdirs)
+        file = adir(fullfile(bdirs{bdir},'art_regression_outliers_[^a]*'));
+        if iscell(file)
+            art_tmp = load(file{1});
+            art_tmp2 = zeros(size(art_tmp.R,1),1);
+            art_tmp2(find(sum(art_tmp.R,2))) = 1;
+        else
+            art_tmp2 = zeros(SPM.nscan(bdir),1);
+        end
+        arts = [arts; art_tmp2];
+    end
+    fprintf('\tProducing Model...\n');
+    des = jc_get_design(SPM);
+    desmat = zeros(sum(SPM.nscan),size(des,2),length(config.window_start:config.window_end)); % timepoint, condition, within-stimulus timepoint
+    desmata = zeros(sum(SPM.nscan),size(des,2)); % the main 'design' matrix...collapsed across its third dimension
+    baseline = zeros(sum(SPM.nscan),1);
+    runmat = []; for i = 1:length(SPM.nscan),null=ones(SPM.nscan(i),1)*i;runmat=[runmat;null];end
+    runmati = runmat;
+    runmat = dummyvar(runmat);
+    cnt = 0;
+    warned = 0;
+    for i = config.window_start:config.window_end
+        cnt = cnt+1;
+        for c = 1:size(des,2)
+            inds = des(c).onidx+i;
+            inds = inds(inds<=size(desmat,1)&inds>0);
+            if any(desmata(inds,c)~=0)&&~warned
+                fprintf('WARNING! Your window is large, and has produced overlap!\n');
+                warned = 1;
+            end
+            desmata(inds,c) = cnt;
+            desmat(inds,c,cnt) = 1;
+        end
+    end
+    % compute the baseline
+    % baseline is TR that are not in active stimuli blocks or the 3 TRs
+    % immediately following a block.
+    offset = 0;
+    for r = 1:length(SPM.Sess)
+        for c = 1:length(SPM.Sess(r).U)
+            for t = 1:length(SPM.Sess(r).U(c).ons)
+                baseline(offset+SPM.Sess(r).U(c).ons(t):offset+SPM.Sess(r).U(c).ons(t)+SPM.Sess(r).U(c).dur(t)+2) = 1;
+            end
+        end
+        offset = offset+SPM.nscan(r);
+    end
+    baseline = double(~baseline);
+    desmata = [desmata baseline runmat];
+    % now, if they don't want all the runs, we have to restrict the
+    % information
+    if ~ischar(config.runs)
+        rinds = [];
+        for i = config.runs
+            rinds = [rinds; find(runmati==i)];
+        end
+        desmat = desmat(rinds,:,:);
+        desmata = desmata(rinds,:);
+        arts = arts(rinds);
+        runmati = runmati(rinds);
+        runmat = runmat(rinds);
+        runstr = num2str([config.runs]')';
+        baseline = baseline(rinds);
+    else
+        rinds = find(runmati);
+        runstr = 'all';
+    end
+    imagesc(desmata);drawnow;title('Extraction Matrix: Conditions, Baseline, Artifacts, Runs');
+    rinds = reshape(rinds,1,[]);
+    fprintf('\tLoading data...');
+    tc = zeros(size(roi_points,1),length(rinds));
+    psf = 0;
+    for tp = 1:length(rinds); %1:length(SPM.xY.VY)
+        fprintf(repmat('\b',1,psf));
+        psf = fprintf('%i/%i',tp,length(rinds));
+        tc(:,tp) = spm_sample_vol(SPM.xY.VY(rinds(tp)),roi_points(:,1),roi_points(:,2),roi_points(:,3),0);
+    end
+    fprintf('\n');
+    % rearrange data by ROI
+    tc_byroi = [];
+    for i = unique(roi_points(:,4))'
+        tc_byroi = [tc_byroi; mean(tc(roi_points(:,4)==i,:))];
+    end
+    arts_rem = zeros(1,length(cur_rois));
+    % remove artifact timepoints, if requested
+    if config.remove_artifacts
+        tc_byroi(:,find(arts)) = NaN;
+        arts_rem = arts_rem + sum(arts);
+    end
+    if config.remove_outliers
+        for r = 1:size(tc_byroi,1)
+            zs = (tc_byroi(r,:)-nanmean(tc_byroi(r,:)))/nanstd(tc_byroi(r,:));
+            arts_rem(r) = arts_rem(r)+sum(zs>config.intensity_thresh);
+            tc_byroi(r,find(zs>config.intensity_thresh)) = NaN;
+        end
+    end
+    % calculate the baseline for each ROI
+    for r = 1:size(tc_byroi,1)
+        blines(r) = nanmean(tc_byroi(r,find(baseline)));
+    end
+    % now produce the averages
+    % rearrange by:
+    % rtc =>  roi x condition x timepoint (and account for baseline)
+    for r = 1:size(tc_byroi,1)
+        for c = 1:size(desmat,2)
+            for t = 1:size(desmat,3)
+                null = nanmean(tc_byroi(r,find(desmat(:,c,t))));
+                rtc_beta(r,c,t) = null;
+                null = (null-blines(r))/blines(r);null=null*100;
+                rtc(r,c,t) = null;
+            end
+        end
+    end
+    mkdir('ROI');
+    for r = 1:length(roi_names)
+        crname = strrep(roi_names{r},'_xyz.mat','');
+        null = regexp(crname,'/','split');
+        crname = null{end};
+        fname = ['ROI/PSC_' crname '_' task '_' date '.csv'];
+        if ~exist(fname,'file')
+            f = fopen(fname,'w');
+            fprintf(f,'subject,runs,roi,condition,artifacts removed,');
+            fprintf(f,'%i TRs,',config.window_start:config.window_end);
+            fprintf(f,'\n');
+        else
+            f = fopen(fname,'a');
+        end
+        for c = 1:size(desmat,2)
+            fprintf(f,'%s,%s,%s,%s,%i,',cur_sub,runstr,crname,des(c).name{:},arts_rem(r));
+            fprintf(f,'%.4f,',squeeze(rtc(r,c,:)));fprintf(f,'\n');
+        end
+        fclose all;
+    end
+    owd = pwd;
+    cd(SPM.swd);
+    conds = {};
+    for sessn = 1:length(SPM.Sess)
+        conds = [SPM.Sess(sessn).U.name conds];
+    end
+    conds = unique(conds);
+    betadata = {};
+    for r = 1:length(roi_names)
+        betadata_mini = [];
+        crname = strrep(roi_names{r},'_xyz.mat','');
+        null = regexp(crname,'/','split');
+        crname = null{end};
+        foundROI=cell2mat(strfind(rois, roi_names{r}));
+        cellfun(strcmp(rois,roi_names{r}
+        rindex=find(foundROI~=0)
+        cur_points = roi_points(roi_points(:,4)==rindex,1:3); %this r corresponds to position in roi_names, which is not necessarily the same value used to designate this ROI in roi_points (which was based on length of 'rois' not 'roi_names')
+        for sessn = 1:length(SPM.Sess)
+            sess_conds = [SPM.Sess(sessn).U.name];
+            for sess_condn = 1:length(sess_conds)
+                sess_cond_ind = find(strcmp(conds,sess_conds{sess_condn}));
+                x = SPM.Vbeta(SPM.Sess(sessn).col(sess_condn));
+                betadata_mini(sess_cond_ind,sessn) = nanmean(spm_sample_vol(x,cur_points(:,1),cur_points(:,2),cur_points(:,3),0));
+            end
+        end
+        betadata_mini(:,end+1) = nanmean(betadata_mini,2);
+        for condn = 1:size(betadata_mini,1)
+            betadata{condn,1} = cur_sub;
+            betadata{condn,2} = arts_rem(r);
+            betadata{condn,3} = crname;
+            betadata{condn,4} = conds{condn};
+            for runn = 1:size(betadata_mini,2)
+                betadata{condn,runn+4} = betadata_mini(condn,runn);
+            end
+        end        
+        fname = fullfile(owd,['ROI/BETA_' crname '_' task '_' date '.csv']);
+        n_assumed_runs = config.n_assumed_runs;
+        if ~exist(fname,'file')
+            f = fopen(fname,'w');
+            fprintf(f,'subject,artifacts removed,roi,condition,');
+            fprintf(f,'Run %i,',1:n_assumed_runs);
+            % there was some confusion being caused by the fact that some
+            % subjects have 4 runs while others have 3, making it look like
+            % the mean value for runs 1-3 in subjects who only have 3 runs
+            % was the value for the 4th run...so for now we're just going
+            % to assume that all subjects have 8 or less runs. it's not the
+            % best, I know, but it's as good as we can get right now. 
+            fprintf(f,'Mean\n');
+        else
+            f = fopen(fname,'a'); 
+        end
+        for entryn = 1:size(betadata,1)
+            tbd = betadata(entryn,:);
+            fprintf(f,'%s,%i,%s,%s',tbd{1:4});
+            fprintf(f,',%.4f',tbd{5:end-1});
+            if numel(tbd(5:end-1)) < n_assumed_runs
+                fprintf(f,repmat(',',1,n_assumed_runs-numel(tbd(5:end-1))));
+            end
+            fprintf(f,',%.4f',tbd{end});
+            fprintf(f,'\n');
+        end
+        fclose all;
+    end
+    cd(owd);
+    end
+end
+end

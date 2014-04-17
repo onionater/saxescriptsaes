@@ -1,0 +1,263 @@
+
+function files=quality(study, task, subjectlist);
+%% aes march 2013
+%% this script provides several measures to assess quality of a run
+%Calculates the voxel-wise mean, SD, and mean/SD (ie: temporal SNR) &
+%prints image/ps file
+%Calculates global mean, SD, and tSNR and prints to txt file
+%Calculates global mean timecourse and correlates with conditions
+%correlates condition regressors with 6 movement parameters and with
+%artifact regressors
+
+
+runs=listbolds(task, subjectlist);
+numSubj=length(subjectlist);
+boldlist=runs{s}
+
+for subject=1:numSubj
+
+numruns=length(boldlist);
+subjectID=subjectlist{subject};
+
+rootdir=['/mindhive/saxelab2/' study '/',subjectID,'/'];
+
+for r=1:numruns
+
+bold=boldlist{r}
+bolddir=[rootdir,'bold/0' num2str(bold)];
+%%get scans to calc snr for
+%p= spm_select(Inf,'image','select scans (all scans for a subject)');
+
+cd(bolddir)
+p=spm_select('list', bolddir, '^swrf.*\.img$'); %% no sure why you need this special filter instead of swrf*.img, but you do
+ips=size(p); ips=ips(2)
+
+brainmask=[rootdir '/3danat/skull_strip_mask.img'];
+    %calc voxel-wise mean, sd, and snr for preprocessed BOLDS
+    for ii=1:numruns
+    disp(['Calculating voxel-wise snr on ',subjectID,'s preprocessed data'])
+    %%%get files and mask and apply mask to data
+    files = spm_vol(p);
+    maskfile=spm_vol(brainmask);
+    data=spm_read_vols(files(1));
+    maskzeros=spm_read_vols(maskfile);
+    data=maskzeros.*data; %%mask data
+    voxelsum=zeros(size(data));
+    sum_sq_deviations=zeros(size(data));
+    timepoints=size(files,1);
+    disp('Calculating mean signal in each voxel:')
+    for i=1:timepoints,
+        data=spm_read_vols(files(i));
+        data=maskzeros.*data;
+        voxelsum=voxelsum+data;
+        globaltimecourse(i)=mean(data(:))
+    end
+    voxelavg=voxelsum/timepoints;
+    disp('Calculating standard deviation over time series in each voxel:')
+    for i=1:timepoints,
+        data=spm_read_vols(files(i));
+        data=maskzeros.*data;
+        sum_sq_deviations=sum_sq_deviations+(voxelavg-data).^2;
+    end
+    sd=sqrt(sum_sq_deviations/(timepoints-1));
+    snr=voxelavg./sd;
+    snr=maskzeros.*snr; %%mask snr (ermm, just to be sure?)
+    snr(isnan(snr))=0;
+    
+    voxels=numel(voxelavg);
+    zerocount=(voxelavg==0);
+    numZeros=sum(zerocount(:))
+    %%%average voxel-wise values to get a global SNR score for each subject
+    globalSD=sum(sd(:))/(voxels-numZeros)
+    globalAVG=sum(voxelavg(:))/(voxels-numZeros)
+    globalSNR=sum(snr(:))/(voxels-numZeros)
+    
+cd(rootdir)
+s=size((dir('quality')));
+if s(1)>0
+mkdir('quality')
+end
+cd([rootdir,'quality'])
+    
+    fid = fopen([subjectID,'_tSNRoutput.txt'],'a');
+    fprintf(fid,'%s %d  \n', 'global mean (over time series):', globalAVG);
+    fprintf(fid,'%s %d  \n', 'global SD (deviations over time):', globalSD);
+    fprintf(fid,'%s %d  \n', 'global SNR (temporal):', globalSNR);
+    fclose(fid);
+    
+    %Clean up snr varaible
+    snr(isnan(snr))=0;
+    snr(snr>5000)=0; %eliminates the absurdly high values that can occur outside the brain
+  
+
+    %output files to the quality dir
+    avg_output=files(1);
+    sd_output=files(1);
+    snr_output=files(1);
+    avg_output.fname    = [subjectID,'_average_run',num2str(ii),'.img'];
+    sd_output.fname    = [subjectID,'_sd_run',num2str(ii),'.img'];
+    snr_output.fname    = [subjectID,'_snr_run',num2str(ii),'.img'];
+    
+    
+    %the following method keeps the scaling factor set to 1
+    avg_output=spm_create_vol(avg_output);
+    sd_output=spm_create_vol(sd_output);
+    snr_output=spm_create_vol(snr_output);
+    disp('Writing out volumes:')
+    for i=1:avg_output.dim(3);
+        avg_output=spm_write_plane(avg_output,voxelavg(:,:,i),i);
+        sdoutput=spm_write_plane(sd_output,sd(:,:,i),i);
+        snr_output=spm_write_plane(snr_output,snr(:,:,i),i); 
+        fprintf ('.')
+    end
+    disp(' ')
+
+    end 
+
+%write completed
+disp(['Subject mean, sd, and snr calculated '])
+
+
+
+%##########################################################
+%New part, might be fucked up.
+%Make and print out figures.
+%So Far it only makes figures for preprocessed data only. 
+currentplot = 1;
+for ii=1:numruns
+        %load files
+        files_avg=spm_vol([subjectID,'_average_run',num2str(ii),'.img']);
+        files_sd=spm_vol([subjectID,'_sd_run',num2str(ii),'.img']);
+        files_snr=spm_vol([subjectID,'_snr_run',num2str(ii),'.img']);
+        data_avg=spm_read_vols(files_avg);
+        data_sd=spm_read_vols(files_sd);
+        data_snr=spm_read_vols(files_snr);
+        %Slices
+        slice1_avg=squeeze(data_avg(:,:,20));
+        slice2_avg=squeeze(data_avg(:,:,24));
+        slice1_sd=squeeze(data_sd(:,:,20));
+        slice2_sd=squeeze(data_sd(:,:,24));
+        axial1_snr=squeeze(data_snr(:,:,20));
+        axial2_snr=squeeze(data_snr(:,:,24));
+        sagital_snr=squeeze(data_snr(26,:,:));
+        coronal_snr=squeeze(data_snr(:,32,:));
+        if currentplot == 1
+            %Do Figure
+            width=8.5;
+            height=11;
+            % Get the screen size in inches
+            set(0,'units','inches')
+            scrsz=get(0,'screensize');
+            % Calculate the position of the figure
+            position=[scrsz(3)/2-width/2 scrsz(4)/2-height/2 width height];
+            figure(1), clf;
+            h=figure(1);
+            set(h,'units','inches')
+            % Place the figure
+            set(h,'position',position)
+            % Do not allow Matlab to resize the figure while printing
+            set(h,'paperpositionmode','auto')
+            % Set screen and figure units back to pixels
+            set(0,'units','pixel')
+            set(h,'units','pixel')
+            %Set colors
+            set(gcf,'color',[1 1 1])
+            colormap(hot)
+        end
+        %Start Plotting
+        if currentplot == 1
+            titlepos = 0.985;
+            subpos = 1;
+            reduction = 0;
+        else
+            titlepos = 0.5;
+            subpos = 9;
+            reduction = 0.475;
+        end
+        %Plots
+        subplot(4,4,subpos)
+            set(gca,'position',[0.05,(0.75-reduction),0.2,0.2])
+            imagesc(flipud(slice1_avg'),[10,900])
+            hold on
+            axis equal
+            axis off
+            title('Avg1','fontweight','bold','position',[27,0.5])
+       subplot(4,4,(subpos+1))
+            set(gca,'position',[0.26,(0.75-reduction),0.2,0.2])
+            imagesc(flipud(slice2_avg'),[10,900])
+            hold on
+            axis equal
+            axis off
+            title('Avg2','fontweight','bold','position',[27,0.5])
+       subplot(4,4,(subpos+2))
+            set(gca,'position',[0.54,(0.75-reduction),0.2,0.2])
+            imagesc(flipud(slice1_sd'),[2,20])
+            hold on
+            axis equal
+            axis off
+            title('SD1','fontweight','bold','position',[27,0.5])
+       subplot(4,4,(subpos+3))
+            set(gca,'position',[0.75,(0.75-reduction),0.2,0.2])
+            imagesc(flipud(slice2_sd'),[2,20])
+            hold on
+            axis equal
+            axis off
+            title('SD2','fontweight','bold','position',[27,0.5])
+       subplot(4,4,(subpos+4))
+            set(gca,'position',[0.05,(0.53-reduction),0.2,0.2])
+            imagesc(flipud(axial1_snr'),[10,350])
+            hold on
+            axis equal
+            axis off
+            title('SnR1','fontweight','bold','position',[27,0.5])
+       subplot(4,4,(subpos+5))
+            set(gca,'position',[0.26,(0.53-reduction),0.2,0.2])
+            imagesc(flipud(axial2_snr'),[10,350])
+            hold on
+            axis equal
+            axis off
+            title('SnR2','fontweight','bold','position',[27,0.5])
+       subplot(4,4,(subpos+6))
+            set(gca,'position',[0.54,(0.53-reduction),0.2,0.2])
+            imagesc(flipud(sagital_snr'),[10,350])
+            hold on
+            axis equal
+            axis off
+            title('SnR Sagital','fontweight','bold','position',[33,0.5])
+       subplot(4,4,(subpos+7))
+            set(gca,'position',[0.75,(0.53-reduction),0.2,0.2])
+            imagesc(flipud(coronal_snr'),[10,350])
+            hold on
+            axis equal
+            axis off
+            title('SnR Coronal','fontweight','bold','position',[27,0.5])
+       %Title
+       ttl = ['SNR\_SD: Run ',ii];
+       tax = axes('Position',[0.01,titlepos,1,1]);
+       tmp= text(0,0,ttl);
+       set(tax,'xlim',[0,1],'ylim',[0,1])
+       set(tmp,'FontSize',16,'HorizontalAlignment','left','FontWeight','bold')
+       axis off
+       %Plot checks
+       if ii == numruns
+               %Print, close and return
+               prnstr = ['print -dpsc2 -painters -append ',[subjectID,'_snr.ps']];
+               eval(prnstr);
+               disp('SNR output printed to file')
+               close (1);
+               return;
+       end            
+       if currentplot == 1
+           currentplot = 2;
+       else
+           %print and clear figure
+           prnstr = ['print -dpsc2 -painters -append ',[subjectID,'_snr.ps']];
+           eval(prnstr);
+           pause(0.5);
+           clf;
+           currentplot = 1;
+       end     
+end
+end
+end
+end

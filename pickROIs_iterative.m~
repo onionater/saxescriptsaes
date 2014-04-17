@@ -1,0 +1,57 @@
+function pickROIs_iterative(study, subjectlist, task, contrast, thresholds)
+%created by AES 7/16/13
+%READ THIS SCRIPT BEFORE YOUR RUN IT. must set ROIs and roistringlim
+%e.g. pickROIs_iterative('EIB',makeIDs('EIB', [4:5, 7:10, 12:13, 15:20]),'EmoBioLoc',10, [.001, .01, .05])
+% runs automized roi picking on subjects in subjectlist, repeating at more lenient threshold for subjects that lack the ROI
+% at more conservative thresholds.
+% run this and autoROI_picker in general using NX because it crashes VNC
+% (WTF?!)
+rootdir='/mindhive/saxelab2/EIB/'
+autoROIdir=[rootdir 'autoROI_jobs']
+roistringlim=2; %12 %how much of roi string to look at
+%these are some rois I like to pick
+if strcmp(task,'tomloc')
+roihome={'/mindhive/saxelab/roi_library/functional/493_subs/','/mindhive/saxelab/roi_library/functional/493_subs/','/mindhive/saxelab/roi_library/functional/EIBrois/','/mindhive/saxelab/roi_library/functional/EIBrois/','/mindhive/saxelab/roi_library/functional/493_subs/', '/mindhive/saxelab/roi_library/functional/493_subs/', '/mindhive/saxelab/roi_library/functional/493_subs/', 'mindhive/saxelab/roi_library/functional/493_subs'}
+ROISind={'RTPJ_xyz','LTPJ_xyz','RSTS_xyz','LSTS_xyz','PC_xyz', 'MMPFC_xyz', 'DMPFC_xyz', 'VMPFC_xyz'};
+roistringlim=9;
+else if strcmp(task,'EmoBioLoc')
+roihome={'/mindhive/saxelab/roi_library/functional/EIBrois/', '/mindhive/saxelab/roi_library/functional/EIBrois/','/mindhive/saxelab/roi_library/functional/EIBrois/','/mindhive/saxelab/roi_library/functional/EIBrois/','/mindhive/saxelab/roi_library/functional/EIBrois/','/mindhive/saxelab/roi_library/functional/EIBrois/'}
+ROISind={'ROI_rFFA_kanparcel_EmoBioLoc','ROI_lFFA_kanparcel_EmoBioLoc', 'ROI_rSTS_kanparcel_EmoBioLoc', 'ROI_lSTS_kanparcel_EmoBioLoc', 'ROI_rOFA_kanparcel_EmoBioLoc', 'ROI_lOFA_kanparcel_EmoBioLoc'};
+%roihome={'/mindhive/saxelab/roi_library/functional/EIBrois/'};
+%ROISind={'ROI_rpSTS_BDbiomot'}
+roistringlim=12;
+    end
+end
+autoROI_picker(study,subjectlist,task,contrast,{'p_val_thresh', thresholds(1)}) %run it one time to create the ROIs at most conservative
+%threshold
+for t=2:length(thresholds)
+for r=1:length(ROISind)
+    roi=ROISind{r}
+    selectedroi=dir([roihome{r}, roi(1:roistringlim) '*.mat'])
+    selectedroi=[roihome{r}, selectedroi.name]
+    hasitcount=0;
+    hasit={};
+    doesnothaveitcount=0;
+    doesnothaveit={};
+for s=1:length(subjectlist)
+   subject=subjectlist{s};
+   subjectROIdir=[rootdir, subject '/autoROI/'];
+   list=dir([subjectROIdir, roi '*']);
+   if size(list,1)>0
+       hasitcount=hasitcount+1;
+       hasit{hasitcount}=subject;
+   else
+       doesnothaveitcount=doesnothaveitcount+1;
+       doesnothaveit{doesnothaveitcount}=subject;
+   end
+end
+doesnothaveit
+if length(doesnothaveit)>0
+autoROI_picker_AES(study,doesnothaveit,task,contrast,selectedroi,{'p_val_thresh',thresholds(t)}) %run it again on reduced subjectlist
+end
+
+end
+end
+
+
+end

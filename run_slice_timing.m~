@@ -1,0 +1,29 @@
+function run_slice_timing(study, tasklist, subjectlist)
+%% created by AES 4/7/13
+%% conducts slice timing on per study basis for all subjects in subject list. 
+% currently to be implemented following realignment and normali
+rootdir=['/mindhive/saxelab2/' study];
+addpath(rootdir)
+addpath('/mindhive/saxelab/scripts/aesscripts');
+
+
+
+for t=1:length(tasklist)
+task=tasklist{t};
+
+runlist=listbolds(task, subjectlist)
+
+for subject=1:length(subjectlist)
+    subjectID=subjectlist{subject}
+    runs=runlist{subject}
+    for r=1:length(runs)
+        p=
+        
+    end
+
+
+
+
+end
+
+end

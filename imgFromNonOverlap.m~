@@ -1,0 +1,24 @@
+function imgFromNonOverlap()
+% creates image from nonoverlap of two images
+%option to take conjunction
+conjunction=1;
+p1=spm_select(inf, 'image', 'pick main roi', '', pwd, '.*', 1); %% not sure why you need this special filter instead of swrf*.img, but you do
+p2=spm_select(inf,'image','Choose an exclusion roi','',pwd,'.*',1); %% not sure why you need this special filter instead of swrf*.img, but you do
+
+mainfiles = spm_vol(p1);
+excludefiles = spm_vol(p2);
+
+maindata=spm_read_vols(mainfiles);
+excludedata=spm_read_vols(excludefiles);
+
+if conjunction==1
+maindata(excludedata==0)=0;
+else
+maindata(excludedata==1)=0;
+end
+[roidir, roiname, ext]=fileparts(mainfiles.fname);
+mainfiles.fname=[roidir, '/g', roiname, ext]
+new_mainfiles=spm_create_vol(mainfiles);
+new_mainfiles = spm_write_vol(new_mainfiles, maindata);
+
+end

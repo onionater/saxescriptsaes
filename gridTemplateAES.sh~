@@ -1,0 +1,11 @@
+#!/bin/bash
+# Export environmental vars and set which queue to send the job to.
+#PBS -V
+#PBS -q {NODE}
+#
+# Name of job and redirection for stdout & stderr.
+#PBS -N {NAME}
+#PBS -o /mindhive/saxelab2/EIB/logs/{NAME}.log
+#PBS -e /mindhive/saxelab2/bdscripts/logs/{NAME}.err
+
+matlab -nosplash -nodisplay -r "{CMD}"

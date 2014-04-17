@@ -1,0 +1,50 @@
+function runsimitar_EIB(task, measureType, subjectlist)
+% e.g. runsimitar_EIB('tomloc', 'euclidean')
+%%created by AES 4/14/13
+%% runs searchlight over whole brain looking for pattern that matches similarity structure specified for task
+
+rootdir='/mindhive/saxelab2/EIB/';
+mvpadir=[rootdir 'EIB_mvpa/'];
+simitardir=[mvpadir 'simitar'];
+
+numSubj=length(subjectlist)
+
+for s=1:numSubj
+    subject=subjectlist{s}
+
+
+load(%???)
+
+measure   = measureType;
+
+if task=='EIB_main'
+structure = [[1 -1 1 -1 1 1 1 -1]
+             [1- 1 -1 1 -1 1 -1 1]
+             [1 -1 1 -1 1 1 1 -1]
+             [1- 1 -1 1 -1 1 -1 1]
+             [1 -1 1 -1 1 1 1 -1]
+             [1- 1 -1 1 -1 1 -1 1]
+             [1 -1 1 -1 1 1 1 -1]
+             [1- 1 -1 1 -1 1 -1 1]];
+else if task=='tomloc'
+        structure = [[1 -1]
+                     [-1 1]]; 
+    end
+end
+
+[structureScoreMap] = computeSimilarityStructureMap(measure,examples,labels,examples,labels,'meta',meta,'similarityStructure',structure);
+
+
+      volume = repmat(NaN,meta.dimensions);
+      clf;
+      volume(meta.indicesIn3D) = structureScoreMap;
+      %imagesc(volume(:,:,1)); axis square;
+      
+      volume_output.name=[task '_' measureType '_raw'];
+       for i=1:volume.dim(3);
+        volume_output=spm_write_plane(volume,voxelavg(:,:,i),i);
+        fprintf ('.')
+    end
+      
+
+end

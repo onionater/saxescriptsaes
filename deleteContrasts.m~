@@ -1,0 +1,35 @@
+function deleteContrasts(maxVal, resultsdir)
+rootdir='/mindhive/saxelab2/EIB/'
+e.g. deleteContrasts(38, '/results/EIB_main_results_normed')
+for i=1:9
+    
+ subjectName=['SAX_EIB_0',num2str(i)]
+ cd([rootdir,subjectName,resultsdir])
+  load('SPM.mat')
+  SPM.xCon=SPM.xCon(1:maxVal)
+  save('SPM.mat','SPM')
+ 
+spmTs=dir([pwd, '/spmT_*']);
+cons=dir([pwd, '/con_*']);
+
+for s=1:length(spmTs)
+    fileName=spmTs(s).name;
+    number=str2num(fileName(end-7:end-4));
+    if number > maxVal
+        delete(fileName);
+    end
+end
+
+for s=1:length(cons)
+    fileName=cons(s).name;
+    number=str2num(fileName(end-7:end-4));
+    if number > maxVal
+        delete(fileName);
+    end
+end
+ 
+ 
+end
+end
+    
+    

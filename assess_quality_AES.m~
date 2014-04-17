@@ -1,0 +1,20 @@
+function motion=assess_quality_AES(study, subjectlist)
+%% e.g. per_
+%%march 2013
+%% wrapper for various quality scripts by AES
+%% run this one script for the study and get full set of relevant quality measures
+rootdir=['mindhive/saxelab2/' study];
+addpath(rootdir)
+addpath('mindhive/saxelab/scripts/aesscripts');
+cd(rootdir)
+
+motion = build_motion_report(study,subjectlist)
+tasklist={'tomloc', 'EmoBioLoc', 'EIB_main'};
+
+for t=1:length(tasklist)
+task=tasklist{t}
+report_big_motion(study,task,subjectlist)
+files=quality_AES(study, task, subjectlist)
+end
+
+end

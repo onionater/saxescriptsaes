@@ -1,0 +1,109 @@
+function mvpaptb_classify(study, task, subjectlist, resultfolder)
+% created by AES 4/18/13, based on the ptb tutorial 
+%this executes basic classification of conditions using princeton toolbox for mvpa
+% assumes you have already created a subjinfo.mat file for each subject,
+% stored in subject's mvpa_ptb subdirectory
+%
+% License:
+%=====================================================================
+%
+% This is part of the Princeton MVPA toolbox, released under
+% the GPL. See http://www.csbmb.princeton.edu/mvpa for more
+% information.
+% 
+% The Princeton MVPA toolbox is available free and
+% unsupported to those who might find it useful. We do not
+% take any responsibility whatsoever for any problems that
+% you have related to the use of the MVPA toolbox.
+%
+% ======================================================================
+
+fextension='.img'; %'.nii';
+rootdir=['mindhive/saxelab2/'];
+studydir=[rootdir study '/'];
+mvpadir='mvpa_ptb/';
+if iscell(subjectlist
+    subjectlist={subjectlist};
+end
+numSubj=length(subjectlist)
+
+
+% Check to make sure the Neuralnetwork toolbox is in the path or this
+% won't work.
+
+if ~exist('newff') %#ok<EXIST>
+    error('This tutorial requires the neural networking toolbox, if it is unavailable this will not execute');
+end
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% INITIALIZING THE SUBJ STRUCTURE
+
+for s=1:numSubj
+    subjectID=subjectlist{s}
+subjdir=[studydir subjectID '/'];
+cd(subjdir)
+
+% start by creating an empty subj structure
+subj = init_subj(study, subjectID);
+summarize(subj)
+load([mvpadir 'subjinfo']); %% contains variables maskname, mvpa_mask_description, boldnames, condregressors, condnames, runselectors
+
+%%% create the mask that will be used when loading in the data
+subj = load_spm_mask(subj,mvpa_mask_description,maskname);
+
+% now, read and set up the actual data, keeping only the voxels active in the
+% mask (see above)
+
+subj = load_spm_pattern(subj,'epi','VT_category-selective',boldnames);
+
+% initialize the regressors object in the subj structure, load in the
+% contents from a file, set the contents into the object and add a
+% cell array of condnames to the object for future reference
+subj = init_object(subj,'regressors','conds');
+subj = set_mat(subj,'regressors','conds',condregressors);
+subj = set_objfield(subj,'regressors','conds','condnames',condnames);
+
+% store the names of the regressor conditions
+% initialize the selectors object, then read in the contents
+% for it from a file, and set them into the object
+subj = init_object(subj,'selector','runs');
+subj = set_mat(subj,'selector','runs',runselectorw);
+
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% PRE-PROCESSING - z-scoring in time and no-peeking anova
+
+% we want to z-score the EPI data (called 'epi'),
+% individually on each run (using the 'runs' selectors)
+subj = zscore_runs(subj,'epi','runs');
+
+% now, create selector indices for the n different iterations of
+% the nminusone
+subj = create_xvalid_indices(subj,'runs');
+
+% run the anova multiple times, separately for each iteration,
+% using the selector indices created above
+[subj] = feature_select(subj,'epi_z','conds','runs_xval');
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% CLASSIFICATION - n-minus-one cross-validation
+
+% set some basic arguments for a backprop classifier
+class_args.train_funct_name = 'train_bp';
+class_args.test_funct_name = 'test_bp';
+class_args.nHidden = 0;
+
+% now, run the classification multiple times, training and testing
+% on different subsets of the data on each iteration
+[subj results] = cross_validation(subj,'epi_z','conds','runs_xval','epi_z_thresh0.05',class_args);
+save([mvpadir subjectID '_classification'], 'subj', 'results');
+
+
+end
+end
+
+
+
